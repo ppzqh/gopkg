@@ -16,8 +16,10 @@ package gopool
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Pool interface {
@@ -88,15 +90,23 @@ type pool struct {
 
 	// This method will be called when the worker panic
 	panicHandler func(context.Context, interface{})
+
+	// stats
+	newCnt          int64
+	totalCallCnt    int64
+	workerStats     []int64 // 0, 1, 10, 100, 1000, 10000
+	workerStatsLock sync.RWMutex
 }
 
 // NewPool creates a new pool with the given name, cap and config.
 func NewPool(name string, cap int32, config *Config) Pool {
 	p := &pool{
-		name:   name,
-		cap:    cap,
-		config: config,
+		name:        name,
+		cap:         cap,
+		config:      config,
+		workerStats: make([]int64, 6),
 	}
+	go p.dumpStat()
 	return p
 }
 
@@ -126,6 +136,7 @@ func (p *pool) CtxGo(ctx context.Context, f func()) {
 	}
 	p.taskLock.Unlock()
 	atomic.AddInt32(&p.taskCount, 1)
+	atomic.AddInt64(&p.totalCallCnt, 1)
 	// The following two conditions are met:
 	// 1. the number of tasks is greater than the threshold.
 	// 2. The current number of workers is less than the upper limit p.cap.
@@ -153,4 +164,39 @@ func (p *pool) incWorkerCount() {
 
 func (p *pool) decWorkerCount() {
 	atomic.AddInt32(&p.workerCount, -1)
+}
+
+func (p *pool) recordWorkerTaskNum(cnt int64) {
+	p.workerStatsLock.Lock()
+	defer p.workerStatsLock.Unlock()
+
+	idx := 0
+	for cnt > 0 {
+		idx++
+		cnt /= 10
+	}
+	if idx >= len(p.workerStats) {
+		p.workerStats[len(p.workerStats)-1]++
+	} else {
+		p.workerStats[idx]++
+	}
+}
+
+func (p *pool) dumpStat() {
+	for range time.Tick(1 * time.Second) {
+		if atomic.LoadInt64(&p.newCnt) != 0 {
+			p.workerStatsLock.RLock()
+			fmt.Printf("[gopool] total GoCtx cnt=%d, new goroutine cnt=%d\n", p.totalCallCnt, p.newCnt)
+			fmt.Printf("[gopool] stats %v\n", p.workerStats)
+			fmt.Printf("[gopool] stats [0]:%.2f%%, [1]:%.2f%%, [10]:%.2f%%, [100]:%.2f%%, [1000]:%.2f%%, [10000]:%.2f%%\n",
+				float64(p.workerStats[0])/float64(p.newCnt)*100,
+				float64(p.workerStats[1])/float64(p.newCnt)*100,
+				float64(p.workerStats[2])/float64(p.newCnt)*100,
+				float64(p.workerStats[3])/float64(p.newCnt)*100,
+				float64(p.workerStats[4])/float64(p.newCnt)*100,
+				float64(p.workerStats[5])/float64(p.newCnt)*100,
+			)
+			p.workerStatsLock.RUnlock()
+		}
+	}
 }

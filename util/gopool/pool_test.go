@@ -64,6 +64,10 @@ func BenchmarkPool(b *testing.B) {
 	config := NewConfig()
 	config.ScaleThreshold = 1
 	p := NewPool("benchmark", int32(runtime.GOMAXPROCS(0)), config)
+	//defer func() {
+	//	fmt.Printf("[gopool] total cnt=%d, goroutine cnt=%d\n", p.(*pool).totalCallCnt, p.(*pool).newCnt)
+	//	fmt.Printf("[gopool] stats:%v\n", p.(*pool).workerStats)
+	//}()
 	var wg sync.WaitGroup
 	b.ReportAllocs()
 	b.ResetTimer()

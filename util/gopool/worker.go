@@ -39,6 +39,14 @@ func newWorker() interface{} {
 
 func (w *worker) run() {
 	go func() {
+		atomic.AddInt64(&w.pool.newCnt, 1)
+		var taskCnt int64 = 0
+		defer func() {
+			//fmt.Printf("[gopool] worker-%d finished task %d\n", id, taskCnt)
+			//if w.pool != nil {
+			//	w.pool.recordWorkerTaskNum(taskCnt)
+			//}
+		}()
 		for {
 			var t *task
 			w.pool.taskLock.Lock()
@@ -46,11 +54,13 @@ func (w *worker) run() {
 				t = w.pool.taskHead
 				w.pool.taskHead = w.pool.taskHead.next
 				atomic.AddInt32(&w.pool.taskCount, -1)
+				taskCnt++
 			}
 			if t == nil {
 				// if there's no task to do, exit
 				w.close()
 				w.pool.taskLock.Unlock()
+				w.pool.recordWorkerTaskNum(taskCnt)
 				w.Recycle()
 				return
 			}
